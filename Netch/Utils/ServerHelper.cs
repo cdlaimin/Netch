@@ -1,11 +1,12 @@
-using Netch.Models;
 using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
-using System.Timers;
-using Range = Netch.Models.Range;
+using Netch.Interfaces;
+using Netch.Models;
+using Timer = System.Timers.Timer;
 
 namespace Netch.Utils
 {
@@ -30,9 +31,9 @@ namespace Netch.Utils
         public static class DelayTestHelper
         {
             private static readonly Timer Timer;
-            private static bool _mux;
+            private static readonly object TestAllLock = new();
 
-            public static readonly Range Range = new(0, int.MaxValue / 1000);
+            public static readonly NumberRange Range = new(0, int.MaxValue / 1000);
 
             static DelayTestHelper()
             {
@@ -68,19 +69,21 @@ namespace Netch.Utils
 
             public static void TestAllDelay()
             {
-                if (_mux)
+                if (!Monitor.TryEnter(TestAllLock))
                     return;
 
                 try
                 {
-                    _mux = true;
                     Parallel.ForEach(Global.Settings.Server, new ParallelOptions { MaxDegreeOfParallelism = 16 }, server => { server.Test(); });
-                    _mux = false;
                     TestDelayFinished?.Invoke(null, new EventArgs());
                 }
                 catch (Exception)
                 {
                     // ignored
+                }
+                finally
+                {
+                    Monitor.Exit(TestAllLock);
                 }
             }
 

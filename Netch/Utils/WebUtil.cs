@@ -1,3 +1,4 @@
+using System;
 using System.IO;
 using System.Net;
 using System.Text;
@@ -8,7 +9,7 @@ namespace Netch.Utils
     public static class WebUtil
     {
         public const string DefaultUserAgent =
-            @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/87.0.4280.67 Safari/537.36 Edg/87.0.664.55";
+            @"Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36 Edg/91.0.864.67";
 
         static WebUtil()
         {
@@ -51,11 +52,12 @@ namespace Netch.Utils
         /// <param name="rep"></param>
         /// <param name="encoding">编码，默认UTF-8</param>
         /// <returns></returns>
-        public static string DownloadString(HttpWebRequest req, out HttpWebResponse rep, string encoding = "UTF-8")
+        public static string DownloadString(HttpWebRequest req, out HttpWebResponse rep, Encoding? encoding = null)
         {
+            encoding ??= Encoding.UTF8;
             rep = (HttpWebResponse)req.GetResponse();
             using var responseStream = rep.GetResponseStream();
-            using var streamReader = new StreamReader(responseStream, Encoding.GetEncoding(encoding));
+            using var streamReader = new StreamReader(responseStream, encoding);
 
             return streamReader.ReadToEnd();
         }
@@ -66,29 +68,51 @@ namespace Netch.Utils
         /// <param name="req"></param>
         /// <param name="encoding">编码，默认UTF-8</param>
         /// <returns></returns>
-        public static async Task<string> DownloadStringAsync(HttpWebRequest req, string encoding = "UTF-8")
+        public static async Task<string> DownloadStringAsync(HttpWebRequest req, Encoding? encoding = null)
         {
+            encoding ??= Encoding.UTF8;
             using var webResponse = await req.GetResponseAsync();
             await using var responseStream = webResponse.GetResponseStream();
-            using var streamReader = new StreamReader(responseStream, Encoding.GetEncoding(encoding));
+            using var streamReader = new StreamReader(responseStream, encoding);
 
             return await streamReader.ReadToEndAsync();
         }
 
-        /// <summary>
-        ///     异步下载到文件
-        /// </summary>
-        /// <param name="req"></param>
-        /// <param name="fileFullPath"></param>
-        /// <returns></returns>
-        public static async Task DownloadFileAsync(HttpWebRequest req, string fileFullPath)
+        public static async Task DownloadFileAsync(string address, string fileFullPath, IProgress<int>? progress = null)
         {
-            using var webResponse = (HttpWebResponse)await req.GetResponseAsync();
-            await using var input = webResponse.GetResponseStream();
-            await using var fileStream = File.OpenWrite(fileFullPath);
+            await DownloadFileAsync(CreateRequest(address), fileFullPath, progress);
+        }
 
-            await input.CopyToAsync(fileStream);
-            fileStream.Flush();
+        public static async Task DownloadFileAsync(HttpWebRequest req, string fileFullPath, IProgress<int>? progress)
+        {
+            await using (var fileStream = File.Open(fileFullPath, FileMode.Create, FileAccess.Write))
+            using (var webResponse = (HttpWebResponse)await req.GetResponseAsync())
+            await using (var input = webResponse.GetResponseStream())
+            using (var downloadTask = input.CopyToAsync(fileStream))
+            {
+                if (progress != null)
+                    ReportProgress(webResponse.ContentLength, downloadTask, fileStream, progress, 200).Forget();
+
+                await downloadTask;
+            }
+
+            progress?.Report(100);
+        }
+
+        private static async Task ReportProgress(long total, IAsyncResult downloadTask, Stream stream, IProgress<int> progress, int interval)
+        {
+            var n = 0;
+            while (!downloadTask.IsCompleted)
+            {
+                var n1 = (int)((double)stream.Length / total * 100);
+                if (n != n1)
+                {
+                    n = n1;
+                    progress.Report(n);
+                }
+
+                await Task.Delay(interval).ConfigureAwait(false);
+            }
         }
     }
 }
